@@ -27,16 +27,10 @@ qbittorrent-mcp 旨在让 AI 或自动化系统能够以极简、标准化的方
 
 ## 安装方法
 
-### 方法一：PyPI 安装
+### uv 安装
 
 ```bash
-pip install git+https://github.com/xkeyC/qbittorrent-mcp
-```
-
-### 方法二：uv 安装
-
-```bash
-uv pip install git+https://github.com/xkeyC/qbittorrent-mcp
+uv tool install git+https://github.com/xkeyC/qbittorrent-mcp
 ```
 
 ### 方法三：配置 Claude Desktop
