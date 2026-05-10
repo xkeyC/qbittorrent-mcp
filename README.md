@@ -12,11 +12,13 @@ qbittorrent-mcp 旨在让 AI 或自动化系统能够以极简、标准化的方
 - **MCP 标准协议**：与主流 AI/自动化平台无缝集成
 - **极简接口**：一行代码即可完成连接与操作
 - **异步支持**：高并发、低延迟，适合大规模自动化
+- **环境变量配置**：可通过环境变量注入 QBittorrent WebUI 登录信息
 - **安全隔离**：无需暴露 QBittorrent 账号密码给第三方
 
 ## 功能特点
 
-- 连接 QBittorrent WebUI（支持鉴权）
+- 静默连接 QBittorrent WebUI（支持鉴权）
+- 支持从环境变量读取 QBittorrent WebUI 连接信息
 - 获取全部种子列表及详细信息
 - 暂停/恢复指定种子
 - 删除种子（可选是否删除文件）
@@ -51,7 +53,13 @@ uv pip install qbittorrent-mcp
       "command": "uvx",
       "args": [
         "qbittorrent-mcp"
-      ]
+      ],
+      "env": {
+        "QBITTORRENT_HOST": "127.0.0.1",
+        "QBITTORRENT_PORT": "8080",
+        "QBITTORRENT_USERNAME": "admin",
+        "QBITTORRENT_PASSWORD": "adminadmin"
+      }
     }
   }
 }
@@ -73,8 +81,14 @@ uv pip install qbittorrent-mcp
         "--directory",
         "/你的本地项目路径/qbittorrent-mcp/",
         "run",
-        "qbittorrent-mcp.py"
-      ]
+        "qbittorrent-mcp"
+      ],
+      "env": {
+        "QBITTORRENT_HOST": "127.0.0.1",
+        "QBITTORRENT_PORT": "8080",
+        "QBITTORRENT_USERNAME": "admin",
+        "QBITTORRENT_PASSWORD": "adminadmin"
+      }
     }
   }
 }
@@ -82,7 +96,7 @@ uv pip install qbittorrent-mcp
 
 这种配置方式适合本地开发和测试使用，可以直接指向本地代码目录。
 
-### 方法二：源码安装
+### 方法五：源码安装
 
 ```bash
 git clone https://github.com/yourname/qbittorrent-mcp.git
@@ -90,30 +104,38 @@ cd qbittorrent-mcp
 pip install .
 ```
 
-## 快速上手
+## 环境变量配置
 
-```python
-from qbittorrent_mcp import connect, list_torrents, pause_torrent, resume_torrent, delete_torrent, add_magnet
+服务器启动时可读取以下环境变量，并在首次调用工具时静默创建 QBittorrent WebUI 客户端；因此在 MCP 客户端配置了环境变量后，可以直接调用 `list_torrents()`、`add_magnet()` 等工具，无需额外执行连接步骤。
 
-# 连接 QBittorrent WebUI
-await connect(host="127.0.0.1", port=8080, username="admin", password="adminadmin")
+| 环境变量 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `QBITTORRENT_HOST` | 否 | `127.0.0.1` | QBittorrent WebUI 主机名或 IP 地址 |
+| `QBITTORRENT_PORT` | 否 | `8080` | QBittorrent WebUI 端口 |
+| `QBITTORRENT_USERNAME` | 是 | 无 | QBittorrent WebUI 用户名 |
+| `QBITTORRENT_PASSWORD` | 是 | 无 | QBittorrent WebUI 密码 |
 
-# 获取种子列表
-print(await list_torrents())
+连接过程由服务端静默完成；`host` 与 `port` 未配置时分别回退到 `127.0.0.1` 和 `8080`。
 
-# 暂停种子
-torrent_hash = "your_torrent_hash"
-await pause_torrent(torrent_hash)
-
-# 恢复种子
-await resume_torrent(torrent_hash)
-
-# 删除种子
-await delete_torrent(torrent_hash, delete_files=False)
-
-# 添加磁力链接
-await add_magnet("magnet:?xt=urn:btih:...")
+```bash
+export QBITTORRENT_HOST=127.0.0.1
+export QBITTORRENT_PORT=8080
+export QBITTORRENT_USERNAME=admin
+export QBITTORRENT_PASSWORD=adminadmin
+uvx qbittorrent-mcp
 ```
+
+## MCP 协议实现
+
+本项目通过官方 `mcp.server.fastmcp.FastMCP` 创建 MCP Server，并使用 `stdio` transport 启动，适用于 Claude Desktop、Cursor 等通过标准输入/输出通信的 MCP 客户端。安装包会暴露 `qbittorrent-mcp` 命令，该命令入口会启动 MCP stdio 服务。
+
+当前暴露的 MCP tools：
+
+- `list_torrents`：获取全部种子列表及状态信息
+- `pause_torrent`：暂停指定哈希的种子
+- `resume_torrent`：恢复指定哈希的种子
+- `delete_torrent`：删除指定哈希的种子，可选删除文件
+- `add_magnet`：添加磁力链接任务
 
 ## 典型场景
 
@@ -123,37 +145,31 @@ await add_magnet("magnet:?xt=urn:btih:...")
 
 ## API 说明
 
-### 1. 连接 QBittorrent WebUI
-```python
-await connect(host: str, port: int, username: str, password: str) -> str
-```
-连接 QBittorrent WebUI，成功返回提示信息。
-
-### 2. 获取种子列表
+### 1. 获取种子列表
 ```python
 await list_torrents() -> str
 ```
 返回所有种子的详细信息（名称、哈希、状态、进度、速度等）。
 
-### 3. 暂停种子
+### 2. 暂停种子
 ```python
 await pause_torrent(torrent_hash: str) -> str
 ```
 暂停指定哈希的种子。
 
-### 4. 恢复种子
+### 3. 恢复种子
 ```python
 await resume_torrent(torrent_hash: str) -> str
 ```
 恢复指定哈希的种子。
 
-### 5. 删除种子
+### 4. 删除种子
 ```python
 await delete_torrent(torrent_hash: str, delete_files: bool = False) -> str
 ```
 删除指定哈希的种子，可选是否同时删除已下载文件。
 
-### 6. 添加磁力链接
+### 5. 添加磁力链接
 ```python
 await add_magnet(magnet_url: str) -> str
 ```
@@ -161,9 +177,10 @@ await add_magnet(magnet_url: str) -> str
 
 ## 最佳实践
 
-- **连接前请确保 QBittorrent WebUI 已开启并允许 API 访问**
+- **调用工具前请确保 QBittorrent WebUI 已开启并允许 API 访问**
 - **所有操作均为异步，建议在 async 环境下调用**
 - **建议将账号密码配置在安全环境变量中，避免泄露**
+- **在 Claude Desktop、Cursor 等 MCP 客户端中优先通过 `env` 字段注入 `QBITTORRENT_USERNAME` 和 `QBITTORRENT_PASSWORD`**
 
 ## 常见问题解答
 
@@ -178,7 +195,7 @@ A: 当前接口为单种子操作，如需批量可自行循环调用。
 
 ## 依赖说明
 
-- Python >= 3.7
+- Python >= 3.11
 - httpx
 - mcp
 

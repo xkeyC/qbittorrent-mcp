@@ -1,10 +1,13 @@
-from typing import Any, Dict, List, Optional
+import os
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
 import httpx
 from mcp.server.fastmcp import FastMCP
 
 # Initialize FastMCP server
 mcp = FastMCP("qbittorrent")
+
 
 @dataclass
 class QBittorrentConfig:
@@ -14,8 +17,23 @@ class QBittorrentConfig:
     username: str
     password: str
 
+
+def _get_env_config() -> Optional[QBittorrentConfig]:
+    """Load QBittorrent WebUI connection configuration from environment variables."""
+    username = os.getenv("QBITTORRENT_USERNAME")
+    password = os.getenv("QBITTORRENT_PASSWORD")
+
+    if not username or not password:
+        return None
+
+    host = os.getenv("QBITTORRENT_HOST", "127.0.0.1")
+    port = int(os.getenv("QBITTORRENT_PORT", "8080"))
+    return QBittorrentConfig(host, port, username, password)
+
+
 class QBittorrentClient:
     """QBittorrent WebUI API client."""
+
     def __init__(self, config: QBittorrentConfig):
         self.base_url = f"http://{config.host}:{config.port}"
         self.auth = (config.username, config.password)
@@ -27,7 +45,7 @@ class QBittorrentClient:
         try:
             response = await self.session.post(
                 f"{self.base_url}/api/v2/auth/login",
-                data={"username": self.auth[0], "password": self.auth[1]}
+                data={"username": self.auth[0], "password": self.auth[1]},
             )
             response.raise_for_status()
             self._cookies = response.cookies
@@ -46,10 +64,10 @@ class QBittorrentClient:
                 method,
                 f"{self.base_url}/api/v2/{endpoint}",
                 cookies=self._cookies,
-                **kwargs
+                **kwargs,
             )
             response.raise_for_status()
-            return response.json() if response.content else None
+            return response.json() if response.content else True
         except Exception:
             return None
 
@@ -61,18 +79,18 @@ class QBittorrentClient:
     async def pause_torrents(self, hashes: List[str]) -> bool:
         """Pause torrents by their hashes."""
         result = await self._request(
-            "POST", 
+            "POST",
             "torrents/pause",
-            data={"hashes": "|".join(hashes)}
+            data={"hashes": "|".join(hashes)},
         )
         return result is not None
 
     async def resume_torrents(self, hashes: List[str]) -> bool:
         """Resume torrents by their hashes."""
         result = await self._request(
-            "POST", 
+            "POST",
             "torrents/resume",
-            data={"hashes": "|".join(hashes)}
+            data={"hashes": "|".join(hashes)},
         )
         return result is not None
 
@@ -83,8 +101,8 @@ class QBittorrentClient:
             "torrents/delete",
             data={
                 "hashes": "|".join(hashes),
-                "deleteFiles": str(delete_files).lower()
-            }
+                "deleteFiles": str(delete_files).lower(),
+            },
         )
         return result is not None
 
@@ -93,38 +111,40 @@ class QBittorrentClient:
         result = await self._request(
             "POST",
             "torrents/add",
-            data={"urls": magnet_url}
+            data={"urls": magnet_url},
         )
         return result is not None
 
 # Global client instance
 _client: Optional[QBittorrentClient] = None
 
-@mcp.tool()
-async def connect(host: str, port: int, username: str, password: str) -> str:
-    """Connect to QBittorrent WebUI.
 
-    Args:
-        host: QBittorrent WebUI host
-        port: QBittorrent WebUI port
-        username: WebUI username
-        password: WebUI password
-    """
+def _get_client() -> Optional[QBittorrentClient]:
+    """Return the active client, lazily initializing it from environment variables."""
     global _client
-    config = QBittorrentConfig(host, port, username, password)
+
+    if _client:
+        return _client
+
+    config = _get_env_config()
+    if not config:
+        return None
+
     _client = QBittorrentClient(config)
-    
-    if await _client._login():
-        return "Successfully connected to QBittorrent WebUI"
-    return "Failed to connect to QBittorrent WebUI"
+    return _client
+
 
 @mcp.tool()
 async def list_torrents() -> str:
     """Get list of all torrents and their download information."""
-    if not _client:
-        return "Not connected to QBittorrent. Use connect() first."
+    client = _get_client()
+    if not client:
+        return (
+            "QBittorrent WebUI credentials are not configured. Set "
+            "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
+        )
 
-    torrents = await _client.get_torrents()
+    torrents = await client.get_torrents()
     if not torrents:
         return "No torrents found or failed to fetch torrents."
 
@@ -142,6 +162,7 @@ async def list_torrents() -> str:
 
     return "\n---\n".join(result)
 
+
 @mcp.tool()
 async def pause_torrent(torrent_hash: str) -> str:
     """Pause a torrent by its hash.
@@ -149,12 +170,17 @@ async def pause_torrent(torrent_hash: str) -> str:
     Args:
         torrent_hash: Hash of the torrent to pause
     """
-    if not _client:
-        return "Not connected to QBittorrent. Use connect() first."
+    client = _get_client()
+    if not client:
+        return (
+            "QBittorrent WebUI credentials are not configured. Set "
+            "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
+        )
 
-    if await _client.pause_torrents([torrent_hash]):
+    if await client.pause_torrents([torrent_hash]):
         return "Successfully paused torrent"
     return "Failed to pause torrent"
+
 
 @mcp.tool()
 async def resume_torrent(torrent_hash: str) -> str:
@@ -163,12 +189,17 @@ async def resume_torrent(torrent_hash: str) -> str:
     Args:
         torrent_hash: Hash of the torrent to resume
     """
-    if not _client:
-        return "Not connected to QBittorrent. Use connect() first."
+    client = _get_client()
+    if not client:
+        return (
+            "QBittorrent WebUI credentials are not configured. Set "
+            "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
+        )
 
-    if await _client.resume_torrents([torrent_hash]):
+    if await client.resume_torrents([torrent_hash]):
         return "Successfully resumed torrent"
     return "Failed to resume torrent"
+
 
 @mcp.tool()
 async def delete_torrent(torrent_hash: str, delete_files: bool = False) -> str:
@@ -178,12 +209,17 @@ async def delete_torrent(torrent_hash: str, delete_files: bool = False) -> str:
         torrent_hash: Hash of the torrent to delete
         delete_files: Whether to delete downloaded files
     """
-    if not _client:
-        return "Not connected to QBittorrent. Use connect() first."
+    client = _get_client()
+    if not client:
+        return (
+            "QBittorrent WebUI credentials are not configured. Set "
+            "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
+        )
 
-    if await _client.delete_torrents([torrent_hash], delete_files):
+    if await client.delete_torrents([torrent_hash], delete_files):
         return "Successfully deleted torrent"
     return "Failed to delete torrent"
+
 
 @mcp.tool()
 async def add_magnet(magnet_url: str) -> str:
@@ -192,13 +228,22 @@ async def add_magnet(magnet_url: str) -> str:
     Args:
         magnet_url: Magnet URL of the torrent
     """
-    if not _client:
-        return "Not connected to QBittorrent. Use connect() first."
+    client = _get_client()
+    if not client:
+        return (
+            "QBittorrent WebUI credentials are not configured. Set "
+            "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
+        )
 
-    if await _client.add_torrent(magnet_url):
+    if await client.add_torrent(magnet_url):
         return "Successfully added torrent"
     return "Failed to add torrent"
 
+
+def main() -> None:
+    """Run the MCP server over stdio."""
+    mcp.run(transport="stdio")
+
+
 if __name__ == "__main__":
-    # Initialize and run the server
-    mcp.run(transport='stdio')
+    main()
