@@ -27,16 +27,10 @@ qbittorrent-mcp 旨在让 AI 或自动化系统能够以极简、标准化的方
 
 ## 安装方法
 
-### 方法一：PyPI 安装
+### uv 安装
 
 ```bash
-pip install qbittorrent-mcp
-```
-
-### 方法二：uv 安装
-
-```bash
-uv pip install qbittorrent-mcp
+uv tool install git+https://github.com/xkeyC/qbittorrent-mcp
 ```
 
 ### 方法三：配置 Claude Desktop
@@ -136,8 +130,6 @@ uvx qbittorrent-mcp
 - `resume_torrent`：恢复指定哈希的种子
 - `delete_torrent`：删除指定哈希的种子，可选删除文件
 - `add_magnet`：添加磁力链接任务
-
-当 QBittorrent WebUI 返回非 2xx HTTP 状态码时，工具会在结果中透传 HTTP 状态码和响应错误信息，方便 MCP 客户端直接展示或排查。
 
 ## 典型场景
 
