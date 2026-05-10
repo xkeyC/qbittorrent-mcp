@@ -18,6 +18,27 @@ class QBittorrentConfig:
     password: str
 
 
+class QBittorrentAPIError(Exception):
+    """QBittorrent WebUI API error with optional HTTP status code."""
+
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
+def _get_response_message(response: httpx.Response) -> str:
+    """Return the most useful error message from an HTTP response."""
+    return response.text.strip() or response.reason_phrase or "Unknown error"
+
+
+def _format_error(action: str, error: QBittorrentAPIError) -> str:
+    """Format an API error for MCP tool responses."""
+    if error.status_code is not None:
+        return f"{action}: HTTP {error.status_code} - {error.message}"
+    return f"{action}: {error.message}"
+
+
 def _get_env_config() -> Optional[QBittorrentConfig]:
     """Load QBittorrent WebUI connection configuration from environment variables."""
     username = os.getenv("QBITTORRENT_USERNAME")
@@ -40,7 +61,7 @@ class QBittorrentClient:
         self.session = httpx.AsyncClient()
         self._cookies = None
 
-    async def _login(self) -> bool:
+    async def _login(self) -> None:
         """Login to QBittorrent WebUI."""
         try:
             response = await self.session.post(
@@ -48,16 +69,21 @@ class QBittorrentClient:
                 data={"username": self.auth[0], "password": self.auth[1]},
             )
             response.raise_for_status()
-            self._cookies = response.cookies
-            return True
-        except Exception:
-            return False
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            raise QBittorrentAPIError(
+                _get_response_message(response),
+                response.status_code,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise QBittorrentAPIError(str(exc)) from exc
+
+        self._cookies = response.cookies
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> Optional[Any]:
         """Make an authenticated request to QBittorrent WebUI API."""
         if not self._cookies:
-            if not await self._login():
-                return None
+            await self._login()
 
         try:
             response = await self.session.request(
@@ -67,9 +93,22 @@ class QBittorrentClient:
                 **kwargs,
             )
             response.raise_for_status()
-            return response.json() if response.content else True
-        except Exception:
-            return None
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            raise QBittorrentAPIError(
+                _get_response_message(response),
+                response.status_code,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise QBittorrentAPIError(str(exc)) from exc
+
+        if not response.content:
+            return True
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text.strip() or True
 
     async def get_torrents(self) -> List[Dict[str, Any]]:
         """Get list of torrents."""
@@ -144,9 +183,13 @@ async def list_torrents() -> str:
             "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
         )
 
-    torrents = await client.get_torrents()
+    try:
+        torrents = await client.get_torrents()
+    except QBittorrentAPIError as error:
+        return _format_error("Failed to fetch torrents", error)
+
     if not torrents:
-        return "No torrents found or failed to fetch torrents."
+        return "No torrents found."
 
     result = []
     for t in torrents:
@@ -177,8 +220,11 @@ async def pause_torrent(torrent_hash: str) -> str:
             "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
         )
 
-    if await client.pause_torrents([torrent_hash]):
-        return "Successfully paused torrent"
+    try:
+        if await client.pause_torrents([torrent_hash]):
+            return "Successfully paused torrent"
+    except QBittorrentAPIError as error:
+        return _format_error("Failed to pause torrent", error)
     return "Failed to pause torrent"
 
 
@@ -196,8 +242,11 @@ async def resume_torrent(torrent_hash: str) -> str:
             "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
         )
 
-    if await client.resume_torrents([torrent_hash]):
-        return "Successfully resumed torrent"
+    try:
+        if await client.resume_torrents([torrent_hash]):
+            return "Successfully resumed torrent"
+    except QBittorrentAPIError as error:
+        return _format_error("Failed to resume torrent", error)
     return "Failed to resume torrent"
 
 
@@ -216,8 +265,11 @@ async def delete_torrent(torrent_hash: str, delete_files: bool = False) -> str:
             "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
         )
 
-    if await client.delete_torrents([torrent_hash], delete_files):
-        return "Successfully deleted torrent"
+    try:
+        if await client.delete_torrents([torrent_hash], delete_files):
+            return "Successfully deleted torrent"
+    except QBittorrentAPIError as error:
+        return _format_error("Failed to delete torrent", error)
     return "Failed to delete torrent"
 
 
@@ -235,8 +287,11 @@ async def add_magnet(magnet_url: str) -> str:
             "QBITTORRENT_USERNAME and QBITTORRENT_PASSWORD."
         )
 
-    if await client.add_torrent(magnet_url):
-        return "Successfully added torrent"
+    try:
+        if await client.add_torrent(magnet_url):
+            return "Successfully added torrent"
+    except QBittorrentAPIError as error:
+        return _format_error("Failed to add torrent", error)
     return "Failed to add torrent"
 
 
