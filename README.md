@@ -30,13 +30,13 @@ qbittorrent-mcp 旨在让 AI 或自动化系统能够以极简、标准化的方
 ### 方法一：PyPI 安装
 
 ```bash
-pip install qbittorrent-mcp
+pip install git+https://github.com/xkeyC/qbittorrent-mcp
 ```
 
 ### 方法二：uv 安装
 
 ```bash
-uv pip install qbittorrent-mcp
+uv pip install git+https://github.com/xkeyC/qbittorrent-mcp
 ```
 
 ### 方法三：配置 Claude Desktop
