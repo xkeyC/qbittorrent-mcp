@@ -1,0 +1,4 @@
+dist/
+qbittorrent_mcp.egg-info/
+__pycache__/
+*.py[cod]
