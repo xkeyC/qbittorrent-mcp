@@ -10,6 +10,9 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("qbittorrent")
 
+TORRENT_SEARCH_PAGE_SIZE = 1000
+TORRENT_SEARCH_MAX_ITEMS = 10000
+
 
 @dataclass
 class QBittorrentConfig:
@@ -120,6 +123,27 @@ def _json_object(value: str, *, name: str) -> dict[str, Any]:
     return parsed
 
 
+def _torrent_matches_keyword(torrent: dict[str, Any], keyword: str) -> bool:
+    normalized = keyword.casefold().strip()
+    if not normalized:
+        return True
+
+    searchable_fields = (
+        "name",
+        "hash",
+        "category",
+        "tags",
+        "state",
+        "save_path",
+        "content_path",
+    )
+    for field in searchable_fields:
+        value = torrent.get(field)
+        if value is not None and normalized in str(value).casefold():
+            return True
+    return False
+
+
 class QBittorrentClient:
     """qBittorrent WebUI API v2 client."""
 
@@ -209,6 +233,51 @@ class QBittorrentClient:
         fields = _clean_params({"urls": _lines_value(urls, name="urls"), **options})
         multipart_fields = [(key, (None, value)) for key, value in fields.items()]
         return await self._request("POST", "torrents/add", files=multipart_fields)
+
+    async def search_torrents(
+        self,
+        params: dict[str, Any],
+        keyword: str,
+        *,
+        result_limit: Optional[int],
+        result_offset: Optional[int],
+    ) -> list[dict[str, Any]]:
+        query_params = {key: value for key, value in params.items() if key not in {"limit", "offset"}}
+        offset = max(result_offset or 0, 0)
+        limit = result_limit if result_limit is None or result_limit > 0 else 0
+        if limit == 0:
+            return []
+
+        results: list[dict[str, Any]] = []
+        matched_count = 0
+        scanned_count = 0
+        api_offset = 0
+
+        while scanned_count < TORRENT_SEARCH_MAX_ITEMS:
+            page_limit = min(TORRENT_SEARCH_PAGE_SIZE, TORRENT_SEARCH_MAX_ITEMS - scanned_count)
+            page = await self.get(
+                "torrents/info",
+                {**query_params, "limit": page_limit, "offset": api_offset},
+            )
+            if not isinstance(page, list) or not page:
+                break
+
+            for torrent in page:
+                if not isinstance(torrent, dict) or not _torrent_matches_keyword(torrent, keyword):
+                    continue
+                if matched_count >= offset:
+                    results.append(torrent)
+                    if limit is not None and len(results) >= limit:
+                        return results
+                matched_count += 1
+
+            page_count = len(page)
+            scanned_count += page_count
+            api_offset += page_count
+            if page_count < page_limit:
+                break
+
+        return results
 
 
 _client: Optional[QBittorrentClient] = None
@@ -300,8 +369,9 @@ async def list_torrents(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
     hashes: str = "",
+    keyword: str = "",
 ) -> str:
-    """List torrents with optional qBittorrent filters."""
+    """List torrents with optional qBittorrent filters and local keyword search."""
 
     params = {
         "filter": filter,
@@ -313,6 +383,18 @@ async def list_torrents(
         "offset": offset,
         "hashes": _pipe_value(hashes, name="hashes") if hashes else "",
     }
+    if keyword.strip():
+        return await _execute(
+            "搜索种子列表",
+            lambda client: client.search_torrents(
+                params,
+                keyword,
+                result_limit=limit,
+                result_offset=offset,
+            ),
+            as_json=True,
+        )
+
     return await _execute("获取种子列表", lambda client: client.get("torrents/info", params), as_json=True)
 
 

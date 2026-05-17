@@ -152,9 +152,15 @@ uvx qbittorrent-mcp
 
 ### 1. 获取种子列表
 ```python
-await list_torrents() -> str
+await list_torrents(keyword: str = "", filter: str = "", limit: int | None = None, offset: int | None = None) -> str
 ```
-返回所有种子的详细信息（名称、哈希、状态、进度、速度等）。
+返回种子的详细信息（名称、哈希、状态、进度、速度等）。`filter` 支持 `downloading`、`completed`、`paused`、`active` 等 qBittorrent 状态筛选；`limit` 和 `offset` 支持分页。传入 `keyword` 时，会在 MCP 侧按页查询最多 10000 条任务，并在 `name`、`hash`、`category`、`tags`、`state`、`save_path`、`content_path` 中进行大小写不敏感匹配，再对匹配结果应用 `limit` 和 `offset`。
+
+示例：
+```python
+await list_torrents(keyword="ubuntu")
+await list_torrents(keyword="ubuntu", filter="completed", limit=20, offset=0)
+```
 
 ### 2. 暂停种子
 ```python
